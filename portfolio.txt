@@ -1,0 +1,6 @@
+{
+  "watchlist": [
+    "2330.TW"
+  ],
+  "holdings": {}
+}
