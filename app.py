@@ -8,16 +8,12 @@ import os
 import time
 
 # ==========================================
-# 資料儲存與處理設定 (已升級支援動態雷達)
+# 資料儲存與處理設定
 # ==========================================
 PORTFOLIO_FILE = "portfolio.json"
 
 def load_data():
-    # 預設的初始雷達名單
-    default_scan_pool = [
-        "2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW",
-        "2881.TW", "2882.TW", "0050.TW", "0056.TW", "00878.TW"
-    ]
+    default_scan_pool = ["2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW", "0050.TW"]
     default_data = {"watchlist": ["2330.TW"], "holdings": {}, "scan_pool": default_scan_pool}
     
     if os.path.exists(PORTFOLIO_FILE):
@@ -26,7 +22,6 @@ def load_data():
                 data = json.load(f)
                 if isinstance(data, list):
                     return default_data
-                # 防呆：如果舊檔案沒有 scan_pool，自動幫補上預設名單
                 if "scan_pool" not in data:
                     data["scan_pool"] = default_scan_pool
                 return data
@@ -134,11 +129,13 @@ def plot_interactive_chart(df, ticker):
     
     return fig
 
-# --- 市場機會掃描器 (已升級：傳入動態清單) ---
 @st.cache_data(ttl=600) 
 def scan_market_opportunities(market_pool):
     opportunities = []
-    for ticker in market_pool:
+    # 如果名單太長，限制最多掃描 40 檔避免雲端當機
+    safe_pool = market_pool[:40] 
+    
+    for ticker in safe_pool:
         df = get_stock_data(ticker)
         if not df.empty:
             _, rec, status, buy_price, sell_price, current_price = analyze_stock(df)
@@ -150,7 +147,7 @@ def scan_market_opportunities(market_pool):
                     "sell_price": sell_price,
                     "current_price": current_price
                 })
-        time.sleep(1.5) # 禮貌休息
+        time.sleep(1.5) 
             
     return opportunities
 
@@ -194,31 +191,45 @@ if st.sidebar.button("➕ 加入關注"):
             st.cache_data.clear() 
             st.rerun()
 
-# 💡【新增區塊】動態雷達掃描管理工具
+# 💡【全新精銳部隊功能區塊】
 st.sidebar.write("---")
 st.sidebar.subheader("🔍 管理雷達掃描清單")
-s_ticker = st.sidebar.text_input("輸入代碼加入掃描 (例如: 2603)", key="s_ticker_input")
-if st.sidebar.button("➕ 加入雷達"):
+
+if st.sidebar.button("👑 一鍵載入台灣 Top 40 精銳", type="primary"):
+    # 寫入台灣最具代表性的 40 檔高流動性權值股
+    top_40_list = [
+        "2330.TW", "2317.TW", "2454.TW", "2382.TW", "2308.TW", "2881.TW", "2882.TW", "2412.TW", "2891.TW", "3231.TW",
+        "2303.TW", "2886.TW", "1301.TW", "1303.TW", "2002.TW", "1216.TW", "2884.TW", "2892.TW", "2603.TW", "2885.TW",
+        "3711.TW", "5871.TW", "2357.TW", "2880.TW", "2379.TW", "2395.TW", "3045.TW", "2912.TW", "1101.TW", "2207.TW",
+        "2883.TW", "1326.TW", "2887.TW", "6669.TW", "3034.TW", "2890.TW", "3008.TW", "2324.TW", "2353.TW", "2609.TW"
+    ]
+    app_data["scan_pool"] = top_40_list
+    save_data(app_data)
+    st.cache_data.clear()
+    st.rerun()
+
+s_ticker = st.sidebar.text_input("輸入代碼加入掃描 (例如: 0050)", key="s_ticker_input")
+if st.sidebar.button("➕ 手動加入雷達"):
     if s_ticker:
         fmt_ticker = format_ticker(s_ticker)
         if fmt_ticker not in app_data["scan_pool"]:
             app_data["scan_pool"].append(fmt_ticker)
             save_data(app_data)
-            st.cache_data.clear() # 清除舊快取強制重掃
+            st.cache_data.clear()
             st.rerun()
 
 st.sidebar.write("---")
 st.sidebar.subheader("🗑️ 移除股票清單")
 
-# 顯示雷達刪除按鈕
-for ticker in list(app_data["scan_pool"]):
-    col1, col2 = st.sidebar.columns([3, 1])
-    col1.write(f"📡 雷達: {ticker}")
-    if col2.button("❌", key=f"del_s_{ticker}"):
-        app_data["scan_pool"].remove(ticker)
-        save_data(app_data)
-        st.cache_data.clear()
-        st.rerun()
+with st.sidebar.expander("展開查看並編輯目前雷達名單"):
+    for ticker in list(app_data["scan_pool"]):
+        col1, col2 = st.columns([3, 1])
+        col1.write(f"📡 {ticker}")
+        if col2.button("❌", key=f"del_s_{ticker}"):
+            app_data["scan_pool"].remove(ticker)
+            save_data(app_data)
+            st.cache_data.clear()
+            st.rerun()
 
 st.sidebar.write("---")
 
@@ -243,128 +254,5 @@ for ticker in app_data["watchlist"]:
 # ------------------------------------------
 st.title("📈 專屬投資組合與大盤分析")
 
-st.header("🌟 今日台股精選推薦") 
-st.markdown("系統每 10 分鐘自動掃描您設定的雷達池，挑選出目前**多頭向上且尚未過熱**的所有潛在機會。")
-
-with st.spinner("正在為您全方位掃描市場機會..."):
-    try:
-        # 💡【關鍵修改】傳入動態設定的 scan_pool
-        opportunities = scan_market_opportunities(app_data["scan_pool"])
-        if not opportunities:
-            st.info("目前雷達清單中暫無符合安全買入條件的個股。您可以從左側邊欄新增更多股票進雷達池喔！")
-        else:
-            for i in range(0, len(opportunities), 3):
-                chunk = opportunities[i:i+3]
-                cols = st.columns(len(chunk))
-                for idx, opp in enumerate(chunk):
-                    with cols[idx]:
-                        st.markdown(f"### 🎯 {opp['ticker']}")
-                        st.success("🟢 推薦買入")
-                        st.markdown(f"**現價**：{opp['current_price']}")
-                        st.info(f"💰 建議買入/支撐：**{opp['buy_price']}**\n\n🎯 目標賣出/壓力：**{opp['sell_price']}**")
-                        st.caption(opp['status'])
-    except Exception as e:
-         st.warning("⚠️ Yahoo 伺服器目前較為繁忙，請稍候 1~2 分鐘後點擊右上角重新整理 (Rerun)。")
-
-st.write("---")
-
-st.header("💼 我的持倉表現")
-if not app_data["holdings"]:
-    st.info("目前沒有持倉紀錄，請從左側邊欄新增。")
-else:
-    total_cost_all = 0.0
-    total_value_all = 0.0
-    with st.spinner("正在計算整體持倉損益..."):
-        for ticker, info in app_data["holdings"].items():
-            data = get_stock_data(ticker)
-            if not data.empty:
-                latest = data.iloc[-1]
-                current_price = latest['Close']
-                total_cost_all += info["price"] * info["quantity"]
-                total_value_all += current_price * info["quantity"]
-        
-        total_pnl = total_value_all - total_cost_all
-        total_pnl_percent = (total_pnl / total_cost_all * 100) if total_cost_all > 0 else 0
-        
-        if total_pnl > 0:
-            overall_advice = "🟢 整體投資組合目前處於獲利狀態。若部分個股出現 RSI 過熱訊號，可考慮分批部分停利入袋。"
-        elif total_pnl < 0:
-            overall_advice = "🔴 整體投資組合目前呈現虧損。建議檢視持倉中是否有跌破關鍵均線支撐的弱勢股，必要時執行停損。"
-        else:
-            overall_advice = "🟡 整體投資組合目前處於損益兩平附近。建議持續觀察大盤走向。"
-
-    st.markdown("#### 📊 整體表現摘要")
-    sum_col1, sum_col2, sum_col3 = st.columns(3)
-    with sum_col1:
-        st.metric(label="投資總成本", value=f"{total_cost_all:,.2f}")
-    with sum_col2:
-        st.metric(label="目前總市值", value=f"{total_value_all:,.2f}")
-    with sum_col3:
-        st.metric(label="未實現總損益", value=f"{total_pnl:,.2f}", delta=f"{total_pnl_percent:.2f}%")
-    
-    st.info(f"**總體操作建議**：\n{overall_advice}")
-    st.write("---")
-    
-    st.markdown("#### 📋 個股詳細狀況")
-    for ticker, info in app_data["holdings"].items():
-        with st.container():
-            st.markdown(f"### 📌 【持倉】 {ticker}")
-            data = get_stock_data(ticker)
-            if not data.empty:
-                analyzed_data, rec, status, buy_price, sell_price, current_price = analyze_stock(data)
-                cost_price = info["price"]
-                qty = info["quantity"]
-                total_cost = cost_price * qty
-                current_value = current_price * qty
-                pnl = current_value - total_cost
-                pnl_percent = (pnl / total_cost * 100) if total_cost > 0 else 0
-                pnl_color = "red" if pnl >= 0 else "green" 
-                
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    st.markdown(f"**買入均價**：{cost_price} | **持有股數**：{qty}")
-                    st.markdown(f"**目前現價**：{current_price:.2f}")
-                    st.markdown(f"**未實現損益**：:<span style='color:{pnl_color}; font-size:20px; font-weight:bold;'>{pnl:.2f} ({pnl_percent:.2f}%)</span>", unsafe_allow_html=True)
-                    st.write("---")
-                    
-                    if "觀望" in rec:
-                        st.warning(f"系統建議：{rec}")
-                    elif "賣出" in rec:
-                        st.error(f"系統建議：{rec}")
-                    else:
-                        st.success(f"系統建議：{rec}")
-                        
-                    st.info(f"💰 建議買入/支撐：**{buy_price}**\n\n🎯 建議賣出/壓力：**{sell_price}**")
-                    st.markdown(status)
-                with col2:
-                    st.plotly_chart(plot_interactive_chart(analyzed_data, ticker), use_container_width=True)
-            else:
-                st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，可能受到網路或流量限制，請稍候再試。")
-        st.write("---")
-
-st.header("👀 關注清單分析")
-if not app_data["watchlist"]:
-    st.info("目前沒有關注股票，請從左側邊欄新增。")
-else:
-    for ticker in app_data["watchlist"]:
-        with st.container():
-            st.markdown(f"### 📌 【關注】 {ticker}")
-            data = get_stock_data(ticker)
-            if not data.empty:
-                analyzed_data, rec, status, buy_price, sell_price, current_price = analyze_stock(data)
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    if "觀望" in rec:
-                        st.warning(f"系統建議：{rec}")
-                    elif "賣出" in rec:
-                        st.error(f"系統建議：{rec}")
-                    else:
-                        st.success(f"系統建議：{rec}")
-                        
-                    st.info(f"💰 建議買入/支撐：**{buy_price}**\n\n🎯 建議賣出/壓力：**{sell_price}**")
-                    st.markdown(status)
-                with col2:
-                    st.plotly_chart(plot_interactive_chart(analyzed_data, ticker), use_container_width=True)
-            else:
-                 st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，請稍候再試。")
-        st.write("---")
+st.header("🌟 今日精銳部隊推薦") 
+st.markdown("系統每 10
