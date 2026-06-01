@@ -8,18 +8,27 @@ import os
 import time
 
 # ==========================================
-# 資料儲存與處理設定
+# 資料儲存與處理設定 (已升級支援動態雷達)
 # ==========================================
 PORTFOLIO_FILE = "portfolio.json"
 
 def load_data():
-    default_data = {"watchlist": ["2330.TW"], "holdings": {}}
+    # 預設的初始雷達名單
+    default_scan_pool = [
+        "2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW",
+        "2881.TW", "2882.TW", "0050.TW", "0056.TW", "00878.TW"
+    ]
+    default_data = {"watchlist": ["2330.TW"], "holdings": {}, "scan_pool": default_scan_pool}
+    
     if os.path.exists(PORTFOLIO_FILE):
         try:
             with open(PORTFOLIO_FILE, "r") as f:
                 data = json.load(f)
                 if isinstance(data, list):
                     return default_data
+                # 防呆：如果舊檔案沒有 scan_pool，自動幫補上預設名單
+                if "scan_pool" not in data:
+                    data["scan_pool"] = default_scan_pool
                 return data
         except:
             return default_data
@@ -39,7 +48,6 @@ def format_ticker(ticker):
 # 核心分析與繪圖邏輯
 # ==========================================
 def get_stock_data(ticker):
-    """防呆機制：若 Yahoo 拒絕連線，回傳空資料避免當機"""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period="1y")
@@ -48,7 +56,6 @@ def get_stock_data(ticker):
         return pd.DataFrame() 
 
 def analyze_stock(df):
-    """技術指標計算：MA5, MA10, MA20, MA50 與 RSI(14)"""
     df['MA5'] = df['Close'].rolling(window=5).mean()
     df['MA10'] = df['Close'].rolling(window=10).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -73,7 +80,6 @@ def analyze_stock(df):
     current_price_rounded = round(current_price, 2)
     recent_high = round(df['High'].tail(20).max(), 2)
     
-    # 策略判斷
     if ma20 > ma50:
         if rsi >= 70:
             recommendation = "🟡 觀望 (Hold) - 短線過熱"
@@ -109,18 +115,15 @@ def analyze_stock(df):
     return df, recommendation, status, suggested_buy_price, suggested_sell_price, current_price_rounded
 
 def plot_interactive_chart(df, ticker):
-    """繪製包含 K線、多條均線與 RSI 指標的專業雙層圖表"""
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.03, row_heights=[0.7, 0.3])
     
-    # 上半部
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K 線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='pink', width=1, dash='dot'), name='5日均線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA10'], line=dict(color='yellow', width=1, dash='dot'), name='10日均線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='orange', width=2), name='20日均線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='blue', width=2), name='50日均線'), row=1, col=1)
     
-    # 下半部
     fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='purple', width=1.5), name='RSI (14)'), row=2, col=1)
     fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
     fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
@@ -131,17 +134,9 @@ def plot_interactive_chart(df, ticker):
     
     return fig
 
-# --- 市場機會掃描器 (火力全開，擴大掃描池至 20 檔) ---
+# --- 市場機會掃描器 (已升級：傳入動態清單) ---
 @st.cache_data(ttl=600) 
-def scan_market_opportunities():
-    # 擴增後的台股大池子，全面覆蓋各大板塊
-    market_pool = [
-        "2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW", # 科技權值
-        "2881.TW", "2882.TW", "2886.TW", "2891.TW",                       # 大型金控
-        "2603.TW", "2609.TW", "2615.TW",                                  # 航運三雄
-        "1519.TW", "1513.TW",                                             # 重電族群
-        "0050.TW", "0056.TW", "00878.TW", "00919.TW", "00929.TW"          # 熱門 ETF
-    ]
+def scan_market_opportunities(market_pool):
     opportunities = []
     for ticker in market_pool:
         df = get_stock_data(ticker)
@@ -155,9 +150,7 @@ def scan_market_opportunities():
                     "sell_price": sell_price,
                     "current_price": current_price
                 })
-        
-        # 禮貌機制：查完一檔休息 1.5 秒，防止被 Yahoo 雲端封鎖
-        time.sleep(1.5) 
+        time.sleep(1.5) # 禮貌休息
             
     return opportunities
 
@@ -168,7 +161,7 @@ st.set_page_config(page_title="專屬投資顧問", layout="wide")
 app_data = load_data()
 
 # ------------------------------------------
-# 側邊欄：投資組合管理
+# 側邊欄：投資組合管理 與 雷達管理
 # ------------------------------------------
 st.sidebar.title("💼 投資組合管理")
 
@@ -201,12 +194,37 @@ if st.sidebar.button("➕ 加入關注"):
             st.cache_data.clear() 
             st.rerun()
 
+# 💡【新增區塊】動態雷達掃描管理工具
+st.sidebar.write("---")
+st.sidebar.subheader("🔍 管理雷達掃描清單")
+s_ticker = st.sidebar.text_input("輸入代碼加入掃描 (例如: 2603)", key="s_ticker_input")
+if st.sidebar.button("➕ 加入雷達"):
+    if s_ticker:
+        fmt_ticker = format_ticker(s_ticker)
+        if fmt_ticker not in app_data["scan_pool"]:
+            app_data["scan_pool"].append(fmt_ticker)
+            save_data(app_data)
+            st.cache_data.clear() # 清除舊快取強制重掃
+            st.rerun()
+
+st.sidebar.write("---")
+st.sidebar.subheader("🗑️ 移除股票清單")
+
+# 顯示雷達刪除按鈕
+for ticker in list(app_data["scan_pool"]):
+    col1, col2 = st.sidebar.columns([3, 1])
+    col1.write(f"📡 雷達: {ticker}")
+    if col2.button("❌", key=f"del_s_{ticker}"):
+        app_data["scan_pool"].remove(ticker)
+        save_data(app_data)
+        st.cache_data.clear()
+        st.rerun()
+
 st.sidebar.write("---")
 
-st.sidebar.subheader("🗑️ 移除股票")
 for ticker in list(app_data["holdings"].keys()):
     col1, col2 = st.sidebar.columns([3, 1])
-    col1.write(f"💼 {ticker}")
+    col1.write(f"💼 持倉: {ticker}")
     if col2.button("❌", key=f"del_h_{ticker}"):
         del app_data["holdings"][ticker]
         save_data(app_data)
@@ -214,7 +232,7 @@ for ticker in list(app_data["holdings"].keys()):
 
 for ticker in app_data["watchlist"]:
     col1, col2 = st.sidebar.columns([3, 1])
-    col1.write(f"👀 {ticker}")
+    col1.write(f"👀 關注: {ticker}")
     if col2.button("❌", key=f"del_w_{ticker}"):
         app_data["watchlist"].remove(ticker)
         save_data(app_data)
@@ -226,15 +244,15 @@ for ticker in app_data["watchlist"]:
 st.title("📈 專屬投資組合與大盤分析")
 
 st.header("🌟 今日台股精選推薦") 
-st.markdown("系統每 10 分鐘自動掃描 20 檔台股各產業指標標的，為您挑選出目前**多頭向上且尚未過熱**的所有潛在機會。")
+st.markdown("系統每 10 分鐘自動掃描您設定的雷達池，挑選出目前**多頭向上且尚未過熱**的所有潛在機會。")
 
 with st.spinner("正在為您全方位掃描市場機會..."):
     try:
-        opportunities = scan_market_opportunities()
+        # 💡【關鍵修改】傳入動態設定的 scan_pool
+        opportunities = scan_market_opportunities(app_data["scan_pool"])
         if not opportunities:
-            st.info("目前大盤多數標的可能處於「短線過熱(RSI>70)」或空頭回檔中。清單內暫無符合安全買入條件的個股，建議多保留現金，耐心等待回檔！")
+            st.info("目前雷達清單中暫無符合安全買入條件的個股。您可以從左側邊欄新增更多股票進雷達池喔！")
         else:
-            # 響應式排版優化：每行最多呈現 3 檔股票，避免手機版擠壓當機
             for i in range(0, len(opportunities), 3):
                 chunk = opportunities[i:i+3]
                 cols = st.columns(len(chunk))
