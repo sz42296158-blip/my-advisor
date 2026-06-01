@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 import os
+import time  # 【新增】用來讓程式暫停休息的工具
 
 # ==========================================
 # 資料儲存與處理設定
@@ -38,18 +39,20 @@ def format_ticker(ticker):
 # 核心分析與繪圖邏輯
 # ==========================================
 def get_stock_data(ticker):
-    stock = yf.Ticker(ticker)
-    df = stock.history(period="1y")
-    return df
+    """【新增】防呆機制，如果 Yahoo 拒絕連線，回傳空資料而不是讓程式當機"""
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1y")
+        return df
+    except Exception as e:
+        return pd.DataFrame() # 發生錯誤時回傳空表格
 
 def analyze_stock(df):
-    """加入 RSI 超買超賣判斷，防止盲目追高，並包含動態均線"""
     df['MA5'] = df['Close'].rolling(window=5).mean()
     df['MA10'] = df['Close'].rolling(window=10).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
     df['MA50'] = df['Close'].rolling(window=50).mean()
     
-    # 計算 14 日 RSI
     delta = df['Close'].diff()
     up = delta.clip(lower=0)
     down = -1 * delta.clip(upper=0)
@@ -123,7 +126,7 @@ def plot_interactive_chart(df, ticker):
     
     return fig
 
-# --- 市場機會掃描器 (台股專屬，10 分鐘更新) ---
+# --- 市場機會掃描器 (加入防呆與延遲機制) ---
 @st.cache_data(ttl=600) 
 def scan_market_opportunities():
     market_pool = ["2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW", "0050.TW", "0056.TW"]
@@ -140,6 +143,10 @@ def scan_market_opportunities():
                     "sell_price": sell_price,
                     "current_price": current_price
                 })
+        
+        # 【新增】每次抓完一檔股票，就強迫程式休息 1.5 秒，避免被 Yahoo 封鎖
+        time.sleep(1.5) 
+        
         if len(opportunities) >= 3:
             break
     return opportunities
@@ -212,18 +219,21 @@ st.header("🌟 今日台股精選推薦")
 st.markdown("系統每 10 分鐘自動掃描台股熱門標的，尋找目前多頭向上且**尚未過熱**的潛在機會。")
 
 with st.spinner("正在為您掃描市場機會..."):
-    opportunities = scan_market_opportunities()
-    if not opportunities:
-        st.info("目前台股熱門標的中，多數股票可能處於過熱狀態或不符合多頭條件。建議多保留現金，不盲目追高！")
-    else:
-        cols = st.columns(len(opportunities))
-        for idx, opp in enumerate(opportunities):
-            with cols[idx]:
-                st.markdown(f"### 🎯 {opp['ticker']}")
-                st.success("🟢 推薦買入")
-                st.markdown(f"**現價**：{opp['current_price']}")
-                st.info(f"💰 建議買入/支撐：**{opp['buy_price']}**\n\n🎯 目標賣出/壓力：**{opp['sell_price']}**")
-                st.caption(opp['status'])
+    try:
+        opportunities = scan_market_opportunities()
+        if not opportunities:
+            st.info("目前大盤波動，可能暫時無法取得推薦標的，請稍候再重新整理網頁！")
+        else:
+            cols = st.columns(len(opportunities))
+            for idx, opp in enumerate(opportunities):
+                with cols[idx]:
+                    st.markdown(f"### 🎯 {opp['ticker']}")
+                    st.success("🟢 推薦買入")
+                    st.markdown(f"**現價**：{opp['current_price']}")
+                    st.info(f"💰 建議買入/支撐：**{opp['buy_price']}**\n\n🎯 目標賣出/壓力：**{opp['sell_price']}**")
+                    st.caption(opp['status'])
+    except Exception as e:
+         st.warning("⚠️ Yahoo 伺服器目前較為繁忙，請稍候 1~2 分鐘後點擊右上角重新整理 (Rerun)。")
 
 st.write("---")
 
@@ -297,6 +307,8 @@ else:
                     st.markdown(status)
                 with col2:
                     st.plotly_chart(plot_interactive_chart(analyzed_data, ticker), use_container_width=True)
+            else:
+                st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，請稍後再試。")
         st.write("---")
 
 st.header("👀 關注清單分析")
@@ -322,4 +334,6 @@ else:
                     st.markdown(status)
                 with col2:
                     st.plotly_chart(plot_interactive_chart(analyzed_data, ticker), use_container_width=True)
+            else:
+                 st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，請稍後再試。")
         st.write("---")
