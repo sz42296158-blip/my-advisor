@@ -39,6 +39,7 @@ def format_ticker(ticker):
 # 核心分析與繪圖邏輯
 # ==========================================
 def get_stock_data(ticker):
+    """防呆機制：若 Yahoo 拒絕連線，回傳空資料避免當機"""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period="1y")
@@ -47,6 +48,7 @@ def get_stock_data(ticker):
         return pd.DataFrame() 
 
 def analyze_stock(df):
+    """技術指標計算：MA5, MA10, MA20, MA50 與 RSI(14)"""
     df['MA5'] = df['Close'].rolling(window=5).mean()
     df['MA10'] = df['Close'].rolling(window=10).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -71,12 +73,13 @@ def analyze_stock(df):
     current_price_rounded = round(current_price, 2)
     recent_high = round(df['High'].tail(20).max(), 2)
     
+    # 策略判斷
     if ma20 > ma50:
         if rsi >= 70:
             recommendation = "🟡 觀望 (Hold) - 短線過熱"
             suggested_buy_price = round(ma20, 2)
             suggested_sell_price = recent_high
-            status = f"雖然趨勢偏多，但 RSI 指標高達 {rsi:.1f}，顯示目前處於「超買」的過熱狀態。建議耐心等待價格回檔至 MA20 ({suggested_buy_price}) 附近再作考慮。"
+            status = f"雖然趨勢偏多，但 RSI 指標高達 {rsi:.1f}，顯示目前處於「超買」過熱狀態。建議耐心等待價格回檔至 MA20 ({suggested_buy_price}) 附近再作考慮。"
         else:
             recommendation = "🟢 推薦買入 (Buy)"
             suggested_sell_price = recent_high
@@ -106,15 +109,18 @@ def analyze_stock(df):
     return df, recommendation, status, suggested_buy_price, suggested_sell_price, current_price_rounded
 
 def plot_interactive_chart(df, ticker):
+    """繪製包含 K線、多條均線與 RSI 指標的專業雙層圖表"""
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.03, row_heights=[0.7, 0.3])
     
+    # 上半部
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K 線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='pink', width=1, dash='dot'), name='5日均線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA10'], line=dict(color='yellow', width=1, dash='dot'), name='10日均線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='orange', width=2), name='20日均線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], line=dict(color='blue', width=2), name='50日均線'), row=1, col=1)
     
+    # 下半部
     fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='purple', width=1.5), name='RSI (14)'), row=2, col=1)
     fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
     fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
@@ -125,10 +131,17 @@ def plot_interactive_chart(df, ticker):
     
     return fig
 
-# --- 市場機會掃描器 (火力全開，掃描整個清單) ---
+# --- 市場機會掃描器 (火力全開，擴大掃描池至 20 檔) ---
 @st.cache_data(ttl=600) 
 def scan_market_opportunities():
-    market_pool = ["2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW", "0050.TW", "0056.TW"]
+    # 擴增後的台股大池子，全面覆蓋各大板塊
+    market_pool = [
+        "2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW", # 科技權值
+        "2881.TW", "2882.TW", "2886.TW", "2891.TW",                       # 大型金控
+        "2603.TW", "2609.TW", "2615.TW",                                  # 航運三雄
+        "1519.TW", "1513.TW",                                             # 重電族群
+        "0050.TW", "0056.TW", "00878.TW", "00919.TW", "00929.TW"          # 熱門 ETF
+    ]
     opportunities = []
     for ticker in market_pool:
         df = get_stock_data(ticker)
@@ -143,9 +156,8 @@ def scan_market_opportunities():
                     "current_price": current_price
                 })
         
-        time.sleep(1.5) # 乖乖休息防封鎖
-        
-        # 【關鍵修改】把數量限制拿掉了！只要符合條件的全部抓進清單
+        # 禮貌機制：查完一檔休息 1.5 秒，防止被 Yahoo 雲端封鎖
+        time.sleep(1.5) 
             
     return opportunities
 
@@ -214,23 +226,25 @@ for ticker in app_data["watchlist"]:
 st.title("📈 專屬投資組合與大盤分析")
 
 st.header("🌟 今日台股精選推薦") 
-st.markdown("系統每 10 分鐘自動掃描大盤，為您挑選出目前多頭向上且尚未過熱的強勢股。")
+st.markdown("系統每 10 分鐘自動掃描 20 檔台股各產業指標標的，為您挑選出目前**多頭向上且尚未過熱**的所有潛在機會。")
 
-with st.spinner("正在為您掃描市場所有機會..."):
+with st.spinner("正在為您全方位掃描市場機會..."):
     try:
         opportunities = scan_market_opportunities()
         if not opportunities:
-            st.info("目前大盤波動，清單中暫無符合安全多頭條件的標的。多保留現金，不盲目追高！")
+            st.info("目前大盤多數標的可能處於「短線過熱(RSI>70)」或空頭回檔中。清單內暫無符合安全買入條件的個股，建議多保留現金，耐心等待回檔！")
         else:
-            # 【關鍵修改】把排版改回多欄位，一次顯示所有找到的好股票！
-            cols = st.columns(len(opportunities))
-            for idx, opp in enumerate(opportunities):
-                with cols[idx]:
-                    st.markdown(f"### 🎯 {opp['ticker']}")
-                    st.success("🟢 推薦買入")
-                    st.markdown(f"**現價**：{opp['current_price']}")
-                    st.info(f"💰 建議買入/支撐：**{opp['buy_price']}**\n\n🎯 目標賣出/壓力：**{opp['sell_price']}**")
-                    st.caption(opp['status'])
+            # 響應式排版優化：每行最多呈現 3 檔股票，避免手機版擠壓當機
+            for i in range(0, len(opportunities), 3):
+                chunk = opportunities[i:i+3]
+                cols = st.columns(len(chunk))
+                for idx, opp in enumerate(chunk):
+                    with cols[idx]:
+                        st.markdown(f"### 🎯 {opp['ticker']}")
+                        st.success("🟢 推薦買入")
+                        st.markdown(f"**現價**：{opp['current_price']}")
+                        st.info(f"💰 建議買入/支撐：**{opp['buy_price']}**\n\n🎯 目標賣出/壓力：**{opp['sell_price']}**")
+                        st.caption(opp['status'])
     except Exception as e:
          st.warning("⚠️ Yahoo 伺服器目前較為繁忙，請稍候 1~2 分鐘後點擊右上角重新整理 (Rerun)。")
 
@@ -255,9 +269,9 @@ else:
         total_pnl_percent = (total_pnl / total_cost_all * 100) if total_cost_all > 0 else 0
         
         if total_pnl > 0:
-            overall_advice = "🟢 整體投資組合目前處於獲利狀態。若部分個股出現 RSI 過熱訊號，可考慮部分停利。"
+            overall_advice = "🟢 整體投資組合目前處於獲利狀態。若部分個股出現 RSI 過熱訊號，可考慮分批部分停利入袋。"
         elif total_pnl < 0:
-            overall_advice = "🔴 整體投資組合目前呈現虧損。建議檢視持倉中是否有跌破關鍵支撐的弱勢股，必要時執行停損。"
+            overall_advice = "🔴 整體投資組合目前呈現虧損。建議檢視持倉中是否有跌破關鍵均線支撐的弱勢股，必要時執行停損。"
         else:
             overall_advice = "🟡 整體投資組合目前處於損益兩平附近。建議持續觀察大盤走向。"
 
@@ -307,7 +321,7 @@ else:
                 with col2:
                     st.plotly_chart(plot_interactive_chart(analyzed_data, ticker), use_container_width=True)
             else:
-                st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，請稍後再試。")
+                st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，可能受到網路或流量限制，請稍候再試。")
         st.write("---")
 
 st.header("👀 關注清單分析")
@@ -334,5 +348,5 @@ else:
                 with col2:
                     st.plotly_chart(plot_interactive_chart(analyzed_data, ticker), use_container_width=True)
             else:
-                 st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，請稍後再試。")
+                 st.warning(f"⚠️ 暫時無法取得 {ticker} 的資料，請稍候再試。")
         st.write("---")
