@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 import os
-import time  # 【新增】用來讓程式暫停休息的工具
+import time
 
 # ==========================================
 # 資料儲存與處理設定
@@ -39,13 +39,12 @@ def format_ticker(ticker):
 # 核心分析與繪圖邏輯
 # ==========================================
 def get_stock_data(ticker):
-    """【新增】防呆機制，如果 Yahoo 拒絕連線，回傳空資料而不是讓程式當機"""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period="1y")
         return df
     except Exception as e:
-        return pd.DataFrame() # 發生錯誤時回傳空表格
+        return pd.DataFrame() 
 
 def analyze_stock(df):
     df['MA5'] = df['Close'].rolling(window=5).mean()
@@ -126,7 +125,7 @@ def plot_interactive_chart(df, ticker):
     
     return fig
 
-# --- 市場機會掃描器 (加入防呆與延遲機制) ---
+# --- 市場機會掃描器 (火力全開，掃描整個清單) ---
 @st.cache_data(ttl=600) 
 def scan_market_opportunities():
     market_pool = ["2330.TW", "2317.TW", "2454.TW", "2382.TW", "3231.TW", "2303.TW", "0050.TW", "0056.TW"]
@@ -144,11 +143,10 @@ def scan_market_opportunities():
                     "current_price": current_price
                 })
         
-        # 【新增】每次抓完一檔股票，就強迫程式休息 1.5 秒，避免被 Yahoo 封鎖
-        time.sleep(1.5) 
+        time.sleep(1.5) # 乖乖休息防封鎖
         
-        if len(opportunities) >= 3:
-            break
+        # 【關鍵修改】把數量限制拿掉了！只要符合條件的全部抓進清單
+            
     return opportunities
 
 # ==========================================
@@ -216,14 +214,15 @@ for ticker in app_data["watchlist"]:
 st.title("📈 專屬投資組合與大盤分析")
 
 st.header("🌟 今日台股精選推薦") 
-st.markdown("系統每 10 分鐘自動掃描台股熱門標的，尋找目前多頭向上且**尚未過熱**的潛在機會。")
+st.markdown("系統每 10 分鐘自動掃描大盤，為您挑選出目前多頭向上且尚未過熱的強勢股。")
 
-with st.spinner("正在為您掃描市場機會..."):
+with st.spinner("正在為您掃描市場所有機會..."):
     try:
         opportunities = scan_market_opportunities()
         if not opportunities:
-            st.info("目前大盤波動，可能暫時無法取得推薦標的，請稍候再重新整理網頁！")
+            st.info("目前大盤波動，清單中暫無符合安全多頭條件的標的。多保留現金，不盲目追高！")
         else:
+            # 【關鍵修改】把排版改回多欄位，一次顯示所有找到的好股票！
             cols = st.columns(len(opportunities))
             for idx, opp in enumerate(opportunities):
                 with cols[idx]:
